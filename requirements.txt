@@ -9,3 +9,4 @@ mlflow
 great-expectations
 pytest
 plotly
+optuna
