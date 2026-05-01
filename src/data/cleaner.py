@@ -1,149 +1,102 @@
 import pandas as pd
 from pathlib import Path
 
-from loader import load_csv
-from quality import check_data_quality, _print_report
-
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 CLEANED_PATH = DATA_DIR / "cleaned.csv"
-NULL_DROP_THRESHOLD = 0.50
 
-# Tokens used to detect time-series-like columns
-_DATETIME_TOKENS = ("date", "time", "timestamp", "datetime", "dt", "period", "year", "month", "week")
+FLOAT_COLS = ["latitude", "longitude", "price", "reviews_per_month"]
+INT_COLS = [
+    "id", "host_id", "minimum_nights", "number_of_reviews",
+    "calculated_host_listings_count", "availability_365", "number_of_reviews_ltm",
+]
+STR_COLS = ["name", "host_name", "neighbourhood", "room_type", "last_review"]
 
-
-def _is_time_series(df: pd.DataFrame) -> bool:
-    """Return True if the dataframe looks like a time series.
-
-    Heuristics:
-    - Any column has a datetime dtype, OR
-    - Any column name contains a datetime-like token.
-    """
-    if any(pd.api.types.is_datetime64_any_dtype(df[c]) for c in df.columns):
-        return True
-    col_lower = [c.lower() for c in df.columns]
-    return any(token in name for name in col_lower for token in _DATETIME_TOKENS)
+# Listings with no reviews have null last_review + reviews_per_month — both are valid
+# data points for a host pricing model, so impute rather than drop them.
+_NULL_FILLS = {
+    "reviews_per_month": 0.0,
+    "last_review":       "",       # feature engineering treats "" as "never reviewed"
+    "host_name":         "Unknown",
+}
 
 
-def _drop_high_null_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-    """Drop columns where > 50% of values are null."""
+def _drop_high_null_columns(df: pd.DataFrame, threshold: float = 0.50) -> pd.DataFrame:
     null_rates = df.isnull().mean()
-    cols_to_drop = null_rates[null_rates > NULL_DROP_THRESHOLD].index.tolist()
-    if cols_to_drop:
-        df = df.drop(columns=cols_to_drop)
-    return df, cols_to_drop
+    to_drop = null_rates[null_rates > threshold].index.tolist()
+    if to_drop:
+        print(f"  Dropped columns (>{threshold:.0%} nulls): {to_drop}")
+    return df.drop(columns=to_drop)
 
 
-def _handle_nulls(
-    df: pd.DataFrame,
-    target_column: str | None,
-    is_ts: bool,
-) -> tuple[pd.DataFrame, int]:
-    """Handle nulls according to data type (time series vs tabular).
-
-    Returns the cleaned dataframe and the number of rows dropped.
-    """
-    initial_rows = len(df)
-
-    # Drop rows where the target is null (only relevant when target_column is set)
-    if target_column and target_column in df.columns:
-        df = df.dropna(subset=[target_column])
-
-    if is_ts:
-        # Forward-fill remaining nulls (preserves row count)
-        df = df.ffill()
-        # Back-fill any leading nulls that ffill couldn't cover
-        df = df.bfill()
-    else:
-        # Drop rows with any remaining nulls
-        df = df.dropna()
-
-    return df, initial_rows - len(df)
-
-
-def _remove_duplicates(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
-    """Drop exact duplicate rows, keeping the first occurrence."""
+def _drop_target_nulls(df: pd.DataFrame, target: str = "price") -> pd.DataFrame:
     before = len(df)
-    df = df.drop_duplicates(keep="first")
-    return df, before - len(df)
-
-
-def _convert_dtypes(df: pd.DataFrame) -> pd.DataFrame:
-    """Coerce columns to clean dtypes.
-
-    - Columns already numeric stay as int64 / float64.
-    - Object columns that can be fully parsed as numeric are converted.
-    - Remaining object columns are cast to string.
-    - Bool columns are left as bool.
-    """
-    for col in df.columns:
-        if pd.api.types.is_bool_dtype(df[col]):
-            continue
-
-        if pd.api.types.is_numeric_dtype(df[col]):
-            # Downcast floats that are whole numbers to int where possible
-            if pd.api.types.is_float_dtype(df[col]):
-                if (df[col].dropna() % 1 == 0).all():
-                    df[col] = df[col].astype("Int64")  # nullable int
-            continue
-
-        if df[col].dtype == object:
-            # Try numeric coercion first
-            coerced = pd.to_numeric(df[col], errors="coerce")
-            if coerced.notna().sum() / max(len(df), 1) > 0.95:
-                df[col] = coerced
-            else:
-                df[col] = df[col].astype(str)
-
+    df = df.dropna(subset=[target])
+    dropped = before - len(df)
+    if dropped:
+        print(f"  Dropped {dropped:,} rows where target '{target}' is null")
     return df
 
 
-def clean_data(
-    df: pd.DataFrame,
-    target_column: str | None = None,
-    save_path: Path = CLEANED_PATH,
-) -> tuple[pd.DataFrame, dict]:
-    """Clean a raw dataframe and return (cleaned_df, quality_report).
+def _impute_known_nulls(df: pd.DataFrame) -> pd.DataFrame:
+    for col, fill_value in _NULL_FILLS.items():
+        if col in df.columns:
+            n = int(df[col].isnull().sum())
+            if n:
+                df[col] = df[col].fillna(fill_value)
+                print(f"  Filled {n:,} nulls in '{col}' with {fill_value!r}")
+    return df
 
-    Steps
-    -----
-    1. Drop columns with > 50% nulls.
-    2. Drop rows where target is null (if target_column is set).
-    3. Forward-fill nulls (time series) or drop null rows (tabular).
-    4. Remove exact duplicate rows.
-    5. Coerce dtypes to numeric / string.
-    6. Save cleaned CSV to save_path.
-    7. Run quality gate and return result.
-    """
-    df = df.copy()
-    is_ts = _is_time_series(df)
 
-    # Step 1 — drop high-null columns
-    df, dropped_cols = _drop_high_null_columns(df)
-    if dropped_cols:
-        print(f"  [clean] Dropped {len(dropped_cols)} high-null column(s): {dropped_cols}")
+def _drop_remaining_nulls(df: pd.DataFrame) -> pd.DataFrame:
+    before = len(df)
+    df = df.dropna()
+    dropped = before - len(df)
+    if dropped:
+        print(f"  Dropped {dropped:,} rows with remaining nulls")
+    return df
 
-    # Step 2 & 3 — handle nulls
-    df, rows_dropped_nulls = _handle_nulls(df, target_column, is_ts)
-    fill_strategy = "forward-filled" if is_ts else "dropped"
-    strategy_label = f"time-series ({fill_strategy})" if is_ts else f"tabular ({fill_strategy})"
-    print(f"  [clean] Null strategy : {strategy_label:<35} rows removed: {rows_dropped_nulls:,}")
 
-    # Step 4 — remove duplicates
-    df, dupes_removed = _remove_duplicates(df)
-    print(f"  [clean] Duplicate rows removed: {dupes_removed:,}")
+def _drop_duplicates(df: pd.DataFrame) -> pd.DataFrame:
+    before = len(df)
+    df = df.drop_duplicates(keep="first")
+    dropped = before - len(df)
+    if dropped:
+        print(f"  Dropped {dropped:,} exact duplicate rows")
+    else:
+        print("  No duplicate rows found")
+    return df
 
-    # Step 5 — convert dtypes
-    df = _convert_dtypes(df)
-    print(f"  [clean] Dtype coercion complete")
 
-    # Step 6 — save
-    df.to_csv(save_path, index=False)
-    print(f"  [clean] Saved cleaned data to: {save_path}")
+def _coerce_dtypes(df: pd.DataFrame) -> pd.DataFrame:
+    for col in FLOAT_COLS:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").astype("float64")
+    for col in INT_COLS:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+    for col in STR_COLS:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip()
+    return df
 
-    # Step 7 — quality gate
-    print(f"  [clean] Re-running quality gate on cleaned data...")
-    quality_result = check_data_quality(df, target_column=target_column)
+
+def clean_data(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    from data.quality import check_data_quality
+
+    print("Cleaning steps:")
+    df = _drop_high_null_columns(df)
+    df = _drop_target_nulls(df)
+    df = _impute_known_nulls(df)
+    df = _drop_remaining_nulls(df)
+    df = _drop_duplicates(df)
+    df = _coerce_dtypes(df)
+    df = df.reset_index(drop=True)
+
+    df.to_csv(CLEANED_PATH, index=False)
+    print(f"\nSaved cleaned data to {CLEANED_PATH}")
+
+    print("\nRe-running quality gate on cleaned data...")
+    quality_result = check_data_quality(df)
 
     return df, quality_result
 
@@ -151,22 +104,40 @@ def clean_data(
 if __name__ == "__main__":
     import sys
 
-    filename = sys.argv[1] if len(sys.argv) > 1 else None
-    if not filename:
-        import glob as _glob
-        csv_files = [p for p in DATA_DIR.glob("*.csv") if p.name != "cleaned.csv"]
-        if not csv_files:
-            raise FileNotFoundError(f"No CSV files found in {DATA_DIR}")
-        filename = csv_files[0].name
-        print(f"No filename provided — using: {filename}\n")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+    from data.loader import load_csv
+
+    csvs = [p for p in DATA_DIR.glob("*.csv") if p.name != "cleaned.csv"]
+    if not csvs:
+        raise FileNotFoundError(f"No raw CSV files found in {DATA_DIR}")
+    filename = sys.argv[1] if len(sys.argv) > 1 else csvs[0].name
+    if len(sys.argv) <= 1:
+        print(f"No filename given — using {filename}\n")
 
     raw_df = load_csv(filename)
-    print(f"Before cleaning: {len(raw_df):,} rows x {raw_df.shape[1]} columns")
-    print()
+    print(f"Raw data:  {len(raw_df):,} rows × {len(raw_df.columns)} columns\n")
 
-    cleaned_df, report = clean_data(raw_df, target_column=None)
+    cleaned_df, quality = clean_data(raw_df)
 
-    print(f"\nAfter cleaning : {len(cleaned_df):,} rows x {cleaned_df.shape[1]} columns")
-    print(f"Rows removed   : {len(raw_df) - len(cleaned_df):,}")
+    print(f"\nCleaned data: {len(cleaned_df):,} rows × {len(cleaned_df.columns)} columns")
+    print(f"Rows retained: {len(cleaned_df)/len(raw_df):.1%}")
 
-    _print_report(report)
+    status = "PASSED" if quality["success"] else "FAILED"
+    print(f"\nQuality gate: {status}")
+
+    if quality["failures"]:
+        print(f"\nFailures ({len(quality['failures'])}):")
+        for msg in quality["failures"]:
+            print(f"  [FAIL] {msg}")
+
+    if quality["warnings"]:
+        print(f"\nWarnings ({len(quality['warnings'])}):")
+        for msg in quality["warnings"]:
+            print(f"  [WARN] {msg}")
+
+    if quality["statistics"].get("target_stats"):
+        t = quality["statistics"]["target_stats"]
+        print(f"\nCleaned target 'price':")
+        print(f"  mean={t['mean']:,.2f}  median={t['median']:,.2f}  "
+              f"std={t['std']:,.2f}  min={t['min']:,.2f}  "
+              f"max={t['max']:,.2f}  skew={t['skew']:.4f}")

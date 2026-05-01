@@ -1,225 +1,197 @@
 import pandas as pd
-import numpy as np
 from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
-# Thresholds
-MIN_ROWS_CRITICAL = 100
-MIN_ROWS_WARN = 1000
-NULL_RATE_CRITICAL = 0.50
-NULL_RATE_WARN = 0.20
-MIN_CLASS_SHARE = 0.05
-IMBALANCE_WARN = 0.10
+# dtype.kind codes: i=integer, f=float, O=object/string, M=datetime
+REQUIRED_SCHEMA: dict[str, tuple[str, ...]] = {
+    "id":               ("i", "f"),
+    "name":             ("O",),
+    "host_id":          ("i", "f"),
+    "neighbourhood":    ("O",),
+    "latitude":         ("f",),
+    "longitude":        ("f",),
+    "room_type":        ("O",),
+    "price":            ("f", "i"),
+    "minimum_nights":   ("i", "f"),
+    "availability_365": ("i", "f"),
+}
+
+NUMERIC_BOUNDS: dict[str, tuple[float, float]] = {
+    "latitude":                       (-90.0,  90.0),
+    "longitude":                      (-180.0, 180.0),
+    "price":                          (0.0,    float("inf")),
+    "minimum_nights":                 (0,      1_825),
+    "availability_365":               (0,      365),
+    "number_of_reviews":              (0,      float("inf")),
+    "reviews_per_month":              (0.0,    100.0),
+    "calculated_host_listings_count": (0,      float("inf")),
+    "number_of_reviews_ltm":          (0,      float("inf")),
+}
+
+TARGET_COLUMN = "price"
+MIN_ROWS = 100
+WARN_ROWS = 1_000
+CRITICAL_NULL_RATE = 0.50
+WARN_NULL_RATE = 0.20
+HIGH_SKEW_THRESHOLD = 2.0
+OUTLIER_IQR_MULTIPLIER = 3.0
 
 
-def _check_schema(
-    df: pd.DataFrame,
-    required_columns: list[str] | None,
-    expected_dtypes: dict[str, str] | None,
-    failures: list,
-    warnings: list,
-) -> None:
-    """Check 1 — required columns exist and have expected dtypes."""
-    if required_columns:
-        missing = [c for c in required_columns if c not in df.columns]
-        if missing:
-            failures.append(f"Schema: missing required columns: {missing}")
-
-    if expected_dtypes:
-        for col, expected in expected_dtypes.items():
-            if col not in df.columns:
-                continue
-            actual = str(df[col].dtype)
-            if not actual.startswith(expected):
-                warnings.append(
-                    f"Schema: column '{col}' expected dtype '{expected}', got '{actual}'"
-                )
-
-
-def _check_row_count(
-    df: pd.DataFrame, failures: list, warnings: list
-) -> None:
-    """Check 2 — dataset has enough rows."""
-    n = len(df)
-    if n < MIN_ROWS_CRITICAL:
-        failures.append(
-            f"Row count: only {n} rows (minimum {MIN_ROWS_CRITICAL} required)"
-        )
-    elif n < MIN_ROWS_WARN:
-        warnings.append(
-            f"Row count: {n} rows is below recommended threshold of {MIN_ROWS_WARN}"
-        )
-
-
-def _check_null_rates(
-    df: pd.DataFrame, failures: list, warnings: list
-) -> dict[str, float]:
-    """Check 3 — null rates per column."""
-    null_rates = (df.isnull().mean()).to_dict()
-    for col, rate in null_rates.items():
-        if rate > NULL_RATE_CRITICAL:
-            failures.append(
-                f"Nulls: column '{col}' has {rate:.1%} missing values (>{NULL_RATE_CRITICAL:.0%} critical threshold)"
-            )
-        elif rate > NULL_RATE_WARN:
+def _check_schema(df: pd.DataFrame) -> tuple[list[str], list[str]]:
+    failures, warnings = [], []
+    for col, allowed_kinds in REQUIRED_SCHEMA.items():
+        if col not in df.columns:
+            failures.append(f"Missing required column: '{col}'")
+        elif df[col].dtype.kind not in allowed_kinds:
             warnings.append(
-                f"Nulls: column '{col}' has {rate:.1%} missing values (>{NULL_RATE_WARN:.0%} warn threshold)"
+                f"Column '{col}' dtype is '{df[col].dtype}' "
+                f"(expected kind in {allowed_kinds})"
             )
-    return null_rates
+    return failures, warnings
 
 
-def _check_value_ranges(
-    df: pd.DataFrame, failures: list, warnings: list
-) -> None:
-    """Check 4 — numeric columns within sensible bounds.
+def _check_row_count(df: pd.DataFrame) -> tuple[list[str], list[str]]:
+    failures, warnings = [], []
+    n = len(df)
+    if n < MIN_ROWS:
+        failures.append(f"Row count {n:,} is below minimum threshold of {MIN_ROWS:,}")
+    elif n < WARN_ROWS:
+        warnings.append(f"Row count {n:,} is low (< {WARN_ROWS:,}); model may underfit")
+    return failures, warnings
 
-    Rules applied automatically by column name heuristics:
-    - *_pct / *_rate / *_ratio / *_score columns: expected in [0, 1] or [0, 100]
-    - Columns whose name suggests a count (*_count, *_num, n_*): no negatives
-    - Any numeric column: flag if max > 10 000% of mean (extreme outlier signal)
-    """
-    numeric_cols = df.select_dtypes(include="number").columns
 
-    for col in numeric_cols:
-        series = df[col].dropna()
-        if series.empty:
-            continue
-
-        col_lower = col.lower()
-
-        # Count-like columns must be non-negative
-        is_count = any(
-            token in col_lower
-            for token in ("count", "_num", "n_", "qty", "quantity")
-        )
-        if is_count and (series < 0).any():
+def _check_null_rates(df: pd.DataFrame) -> tuple[list[str], list[str]]:
+    failures, warnings = [], []
+    for col, rate in df.isnull().mean().items():
+        if rate > CRITICAL_NULL_RATE:
             failures.append(
-                f"Range: count column '{col}' contains negative values"
+                f"Column '{col}' has {rate:.1%} null rate "
+                f"(critical threshold: {CRITICAL_NULL_RATE:.0%})"
             )
-
-        # Ratio/percentage columns bounded to [0, 1] or [0, 100]
-        ratio_tokens = ("_pct", "_rate", "_ratio", "_score", "_probability", "_prob",
-                        "pct_", "rate_", "ratio_", "score_")
-        is_ratio = any(token in col_lower for token in ratio_tokens)
-        if is_ratio:
-            col_max = series.max()
-            col_min = series.min()
-            if col_min < 0:
-                failures.append(
-                    f"Range: ratio/pct column '{col}' has values below 0 (min={col_min:.4f})"
-                )
-            elif col_max > 100:
-                failures.append(
-                    f"Range: ratio/pct column '{col}' has values above 100 (max={col_max:.4f})"
-                )
-
-        # Generic extreme-outlier check: max > 10 000% of mean
-        col_mean = series.mean()
-        if col_mean > 0:
-            ratio = series.max() / col_mean
-            if ratio > 100:
-                warnings.append(
-                    f"Range: column '{col}' has extreme spread — max is {ratio:.0f}x the mean"
-                )
+        elif rate > WARN_NULL_RATE:
+            warnings.append(
+                f"Column '{col}' has {rate:.1%} null rate "
+                f"(warn threshold: {WARN_NULL_RATE:.0%})"
+            )
+    return failures, warnings
 
 
-def _check_target_distribution(
-    df: pd.DataFrame,
-    target_column: str | None,
-    failures: list,
-    warnings: list,
-) -> dict | None:
-    """Check 5 — classification target has enough classes and balance."""
-    if not target_column:
-        return None
-    if target_column not in df.columns:
+def _check_value_ranges(df: pd.DataFrame) -> tuple[list[str], list[str]]:
+    failures, warnings = [], []
+    for col, (lo, hi) in NUMERIC_BOUNDS.items():
+        if col not in df.columns:
+            continue
+        series = df[col].dropna()
+        actual_min, actual_max = series.min(), series.max()
+        if actual_min < lo:
+            failures.append(
+                f"Column '{col}' has values below minimum bound "
+                f"{lo} (found {actual_min})"
+            )
+        if hi != float("inf") and actual_max > hi:
+            failures.append(
+                f"Column '{col}' has values above maximum bound "
+                f"{hi} (found {actual_max})"
+            )
+    return failures, warnings
+
+
+def _check_target_distribution(df: pd.DataFrame) -> tuple[list[str], list[str]]:
+    """Regression checks on price: existence, variance, skew, extreme outliers."""
+    failures, warnings = [], []
+
+    if TARGET_COLUMN not in df.columns:
+        failures.append(f"Target column '{TARGET_COLUMN}' not found in dataset")
+        return failures, warnings
+
+    if not pd.api.types.is_numeric_dtype(df[TARGET_COLUMN]):
+        failures.append(f"Target '{TARGET_COLUMN}' must be numeric for price regression")
+        return failures, warnings
+
+    series = df[TARGET_COLUMN].dropna()
+
+    if series.std() == 0:
         failures.append(
-            f"Target: column '{target_column}' not found in dataframe"
+            f"Target '{TARGET_COLUMN}' has zero variance — all values are identical"
         )
-        return None
+        return failures, warnings
 
-    value_counts = df[target_column].value_counts(normalize=True)
-    n_classes = len(value_counts)
-
-    if n_classes < 2:
+    n_negative = int((series <= 0).sum())
+    if n_negative > 0:
         failures.append(
-            f"Target: '{target_column}' has only {n_classes} class — need at least 2"
-        )
-        return {"n_classes": n_classes, "class_shares": value_counts.to_dict()}
-
-    rare_classes = value_counts[value_counts < MIN_CLASS_SHARE]
-    if not rare_classes.empty:
-        failures.append(
-            f"Target: {len(rare_classes)} class(es) in '{target_column}' "
-            f"represent <{MIN_CLASS_SHARE:.0%} of data: {rare_classes.index.tolist()}"
+            f"Target '{TARGET_COLUMN}' has {n_negative:,} non-positive values "
+            "(prices must be > 0)"
         )
 
-    imbalanced = value_counts[value_counts < IMBALANCE_WARN]
-    non_critical_imbalance = imbalanced[imbalanced >= MIN_CLASS_SHARE]
-    if not non_critical_imbalance.empty:
+    skew = series.skew()
+    if abs(skew) > HIGH_SKEW_THRESHOLD:
         warnings.append(
-            f"Target: '{target_column}' has imbalanced classes "
-            f"(<{IMBALANCE_WARN:.0%}): {non_critical_imbalance.index.tolist()}"
+            f"Target '{TARGET_COLUMN}' is highly skewed (skewness={skew:.2f}); "
+            "a log-transform is strongly recommended before modelling"
         )
 
-    return {"n_classes": n_classes, "class_shares": value_counts.round(4).to_dict()}
+    q1, q3 = series.quantile(0.25), series.quantile(0.75)
+    iqr = q3 - q1
+    n_outliers = int(((series < q1 - OUTLIER_IQR_MULTIPLIER * iqr) |
+                      (series > q3 + OUTLIER_IQR_MULTIPLIER * iqr)).sum())
+    if n_outliers > 0:
+        warnings.append(
+            f"Target '{TARGET_COLUMN}' has {n_outliers:,} extreme outliers ({n_outliers/len(series):.1%}) "
+            f"beyond {OUTLIER_IQR_MULTIPLIER:.0f}×IQR — consider capping before modelling"
+        )
+
+    null_pct = df[TARGET_COLUMN].isnull().mean()
+    if null_pct > 0:
+        warnings.append(
+            f"Target '{TARGET_COLUMN}' has {null_pct:.1%} missing values — "
+            "these rows will be dropped during training"
+        )
+
+    return failures, warnings
 
 
-def check_data_quality(
-    df: pd.DataFrame,
-    required_columns: list[str] | None = None,
-    expected_dtypes: dict[str, str] | None = None,
-    target_column: str | None = None,
-) -> dict:
-    """Run 5 data quality checks and return a structured report.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The dataset to check.
-    required_columns : list[str], optional
-        Column names that must be present.
-    expected_dtypes : dict[str, str], optional
-        Mapping of column name to expected dtype prefix, e.g. {'age': 'int', 'price': 'float'}.
-    target_column : str, optional
-        Name of the classification target column for distribution checks.
-
-    Returns
-    -------
-    dict with keys: success, failures, warnings, statistics
-    """
+def check_data_quality(df: pd.DataFrame) -> dict:
     failures: list[str] = []
     warnings: list[str] = []
 
-    # --- Run checks ---
-    _check_schema(df, required_columns, expected_dtypes, failures, warnings)
-    _check_row_count(df, failures, warnings)
-    null_rates = _check_null_rates(df, failures, warnings)
-    _check_value_ranges(df, failures, warnings)
-    target_stats = _check_target_distribution(df, target_column, failures, warnings)
+    for check in (
+        _check_schema,
+        _check_row_count,
+        _check_null_rates,
+        _check_value_ranges,
+        _check_target_distribution,
+    ):
+        f, w = check(df)
+        failures.extend(f)
+        warnings.extend(w)
 
-    # --- Build statistics ---
-    total_nulls_by_column = df.isnull().sum().to_dict()
+    null_counts = df.isnull().sum()
     statistics = {
         "total_rows": len(df),
         "total_columns": len(df.columns),
-        "total_nulls": int(df.isnull().sum().sum()),
-        "total_nulls_by_column": {
-            col: int(count)
-            for col, count in total_nulls_by_column.items()
-            if count > 0
-        },
-        "null_rates_by_column": {
+        "total_nulls": int(null_counts.sum()),
+        "total_nulls_by_column": null_counts[null_counts > 0].to_dict(),
+        "null_rate_by_column": {
             col: round(rate, 4)
-            for col, rate in null_rates.items()
+            for col, rate in df.isnull().mean().items()
             if rate > 0
         },
-        "numeric_column_count": int(df.select_dtypes(include="number").shape[1]),
-        "categorical_column_count": int(df.select_dtypes(include="object").shape[1]),
+        "numeric_columns": list(df.select_dtypes(include="number").columns),
+        "categorical_columns": list(df.select_dtypes(include="object").columns),
+        "target_stats": (
+            {
+                "mean":   round(df[TARGET_COLUMN].mean(), 2),
+                "median": round(df[TARGET_COLUMN].median(), 2),
+                "std":    round(df[TARGET_COLUMN].std(), 2),
+                "min":    round(df[TARGET_COLUMN].min(), 2),
+                "max":    round(df[TARGET_COLUMN].max(), 2),
+                "skew":   round(df[TARGET_COLUMN].skew(), 4),
+            }
+            if TARGET_COLUMN in df.columns and pd.api.types.is_numeric_dtype(df[TARGET_COLUMN])
+            else {}
+        ),
     }
-    if target_stats:
-        statistics["target_distribution"] = target_stats
 
     return {
         "success": len(failures) == 0,
@@ -229,61 +201,48 @@ def check_data_quality(
     }
 
 
-def _print_report(report: dict) -> None:
-    status = "PASSED" if report["success"] else "FAILED"
-    print(f"\n{'='*52}")
-    print(f"  DATA QUALITY GATE: {status}")
-    print(f"{'='*52}")
-
-    stats = report["statistics"]
-    print(f"\nStatistics:")
-    print(f"  Rows            : {stats['total_rows']:,}")
-    print(f"  Columns         : {stats['total_columns']}")
-    print(f"  Total nulls     : {stats['total_nulls']:,}")
-    print(f"  Numeric columns : {stats['numeric_column_count']}")
-    print(f"  Object columns  : {stats['categorical_column_count']}")
-
-    if stats.get("null_rates_by_column"):
-        print(f"\n  Null rates (affected columns only):")
-        for col, rate in stats["null_rates_by_column"].items():
-            print(f"    {col:<30} {rate:.2%}")
-
-    if stats.get("target_distribution"):
-        td = stats["target_distribution"]
-        print(f"\n  Target distribution ({td['n_classes']} classes):")
-        for cls, share in list(td["class_shares"].items())[:10]:
-            print(f"    {str(cls):<30} {share:.2%}")
-        if td["n_classes"] > 10:
-            print(f"    ... and {td['n_classes'] - 10} more classes")
-
-    if report["failures"]:
-        print(f"\nFailures ({len(report['failures'])}):")
-        for f in report["failures"]:
-            print(f"  [FAIL] {f}")
-
-    if report["warnings"]:
-        print(f"\nWarnings ({len(report['warnings'])}):")
-        for w in report["warnings"]:
-            print(f"  [WARN] {w}")
-
-    if not report["failures"] and not report["warnings"]:
-        print("\n  No issues found.")
-
-    print(f"\n{'='*52}\n")
-
-
 if __name__ == "__main__":
     import sys
-    from loader import load_csv
 
-    filename = sys.argv[1] if len(sys.argv) > 1 else None
-    if not filename:
-        csv_files = list(DATA_DIR.glob("*.csv"))
-        if not csv_files:
-            raise FileNotFoundError(f"No CSV files found in {DATA_DIR}")
-        filename = csv_files[0].name
-        print(f"No filename provided — using: {filename}")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+    from data.loader import load_csv
+
+    csvs = list(DATA_DIR.glob("*.csv"))
+    if not csvs:
+        raise FileNotFoundError(f"No CSV files found in {DATA_DIR}")
+    filename = sys.argv[1] if len(sys.argv) > 1 else csvs[0].name
+    if len(sys.argv) <= 1:
+        print(f"No filename given — using {filename}\n")
 
     df = load_csv(filename)
-    report = check_data_quality(df, target_column=None)
-    _print_report(report)
+    result = check_data_quality(df)
+
+    status = "PASSED" if result["success"] else "FAILED"
+    print(f"Quality gate: {status}")
+
+    if result["failures"]:
+        print(f"\nFailures ({len(result['failures'])}):")
+        for msg in result["failures"]:
+            print(f"  [FAIL] {msg}")
+
+    if result["warnings"]:
+        print(f"\nWarnings ({len(result['warnings'])}):")
+        for msg in result["warnings"]:
+            print(f"  [WARN] {msg}")
+
+    stats = result["statistics"]
+    print(f"\nStatistics:")
+    print(f"  total_rows:    {stats['total_rows']:,}")
+    print(f"  total_columns: {stats['total_columns']}")
+    print(f"  total_nulls:   {stats['total_nulls']:,}")
+    if stats["total_nulls_by_column"]:
+        print("  nulls by column:")
+        for col, count in stats["total_nulls_by_column"].items():
+            rate = stats["null_rate_by_column"].get(col, 0)
+            print(f"    {col}: {count:,}  ({rate:.1%})")
+    if stats["target_stats"]:
+        t = stats["target_stats"]
+        print(f"\nTarget '{TARGET_COLUMN}':")
+        print(f"  mean={t['mean']:,.2f}  median={t['median']:,.2f}  "
+              f"std={t['std']:,.2f}  min={t['min']:,.2f}  max={t['max']:,.2f}  "
+              f"skew={t['skew']:.4f}")
