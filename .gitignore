@@ -1,26 +1,12 @@
-# Data and model artifacts (root-level only)
 /data/
 /models/
-
-# Environment
 .env
-.env/
-venv/
-.venv/
-
-# Python
 __pycache__/
-*.py[cod]
+.ipynb_checkpoints/
+*.pyc
+*.pyo
 *.egg-info/
 dist/
 build/
-
-# Jupyter
-.ipynb_checkpoints/
-
-# MLflow
+.pytest_cache/
 mlruns/
-
-# OS
-.DS_Store
-Thumbs.db
