@@ -1,20 +1,19 @@
-# ── Streamlit app (Streamlit Cloud uses this file directly) ───────────────
+# Streamlit app dependencies (used by Streamlit Community Cloud)
 streamlit
 plotly
 pandas
 numpy
+joblib==1.4.2
 
-# Pinned to match the environment the production_model.pkl was trained in.
-# Mismatched versions cause joblib to fail loading the sklearn wrapper.
+# Pinned: must match the versions used when production_model.pkl was trained
 scikit-learn==1.5.1
 lightgbm==4.6.0
-joblib
 
-# ── Training pipeline (local only — not needed by the deployed app) ───────
-xgboost
-optuna
-mlflow
+# Training pipeline (local only)
+# xgboost
+# optuna
+# mlflow
 
-# ── Dev / CI ──────────────────────────────────────────────────────────────
-pytest
-flake8
+# Dev / CI (local only)
+# pytest
+# flake8
