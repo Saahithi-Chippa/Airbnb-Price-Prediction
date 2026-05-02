@@ -957,12 +957,12 @@ def main() -> None:
             st.warning("Demo mode — synthetic data", icon="⚠️")
         else:
             st.markdown(
-                f"<div style='font-size:0.78rem;color:#aaa'>"
-                f"Model: LightGBM (tuned)<br>"
-                f"Test MAE: ฿1,573 THB<br>"
-                f"Dataset: 23,273 listings<br>"
-                f"City: Bangkok, Thailand"
-                f"</div>",
+                "<div style='font-size:0.78rem;color:#aaa'>"
+                "Model: LightGBM (tuned)<br>"
+                "Test MAE: ฿1,573 THB<br>"
+                "Dataset: 23,273 listings<br>"
+                "City: Bangkok, Thailand"
+                "</div>",
                 unsafe_allow_html=True,
             )
 

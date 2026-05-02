@@ -3,7 +3,6 @@ Generate data/predictions.csv — test-set predictions from the production model
 Must be run before launching the Streamlit dashboard.
 """
 
-import sys
 import numpy as np
 import pandas as pd
 import joblib

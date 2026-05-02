@@ -137,7 +137,7 @@ if __name__ == "__main__":
 
     if quality["statistics"].get("target_stats"):
         t = quality["statistics"]["target_stats"]
-        print(f"\nCleaned target 'price':")
+        print("\nCleaned target 'price':")
         print(f"  mean={t['mean']:,.2f}  median={t['median']:,.2f}  "
               f"std={t['std']:,.2f}  min={t['min']:,.2f}  "
               f"max={t['max']:,.2f}  skew={t['skew']:.4f}")

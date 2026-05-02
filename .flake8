@@ -1,0 +1,11 @@
+[flake8]
+max-line-length = 120
+
+# E221/E222: allow column-aligned assignment blocks (intentional style)
+# E201:      allow space after opening bracket in aligned blocks
+extend-ignore = E201, E221, E222
+
+# streamlit_app.py contains long HTML/markdown strings that can't be
+# split without breaking the rendered output
+per-file-ignores =
+    app/streamlit_app.py: E501

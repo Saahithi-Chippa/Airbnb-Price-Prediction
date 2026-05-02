@@ -231,7 +231,7 @@ if __name__ == "__main__":
             print(f"  [WARN] {msg}")
 
     stats = result["statistics"]
-    print(f"\nStatistics:")
+    print("\nStatistics:")
     print(f"  total_rows:    {stats['total_rows']:,}")
     print(f"  total_columns: {stats['total_columns']}")
     print(f"  total_nulls:   {stats['total_nulls']:,}")

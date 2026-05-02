@@ -214,7 +214,7 @@ if __name__ == "__main__":
     print(f"  {'Model':<35} {'Test MAE':>10}   {'vs baseline':>12}")
     print(f"  {'-'*60}")
     print(f"  {'LinearRegression (baseline)':<35} {_BASELINE_MAE:>10,}   {'':>12}")
-    print(f"  {'LightGBM (default params)':<35} {_PRETUNE_MAE:>10,}   {(_PRETUNE_MAE - _BASELINE_MAE) / _BASELINE_MAE * 100:>+11.1f}%")
+    print(f"  {'LightGBM (default params)':<35} {_PRETUNE_MAE:>10,}   {(_PRETUNE_MAE - _BASELINE_MAE) / _BASELINE_MAE * 100:>+11.1f}%")  # noqa: E501
     print(f"  {'LightGBM (tuned)':<35} {metrics['MAE']:>10,.0f}   {vs_baseline:>+11.1f}%")
     print(f"\n  Tuning gain over default params: {vs_pretune:+.1f}%")
 

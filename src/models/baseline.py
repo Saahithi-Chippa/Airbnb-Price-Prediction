@@ -31,7 +31,6 @@ This baseline sets the performance floor: any subsequent model (XGBoost, LightGB
 that cannot exceed these metrics on the held-out test set adds no value.
 """
 
-import sys
 import time
 import joblib
 import numpy as np

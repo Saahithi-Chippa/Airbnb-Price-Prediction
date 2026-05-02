@@ -4,8 +4,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from data.loader import load_csv
-from features.engineering import create_features, select_features
+from data.loader import load_csv  # noqa: E402
+from features.engineering import create_features, select_features  # noqa: E402
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 

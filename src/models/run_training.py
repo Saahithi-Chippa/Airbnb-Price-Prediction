@@ -183,8 +183,8 @@ def train_and_log(
         # -- Console summary -------------------------------------------------
         print(f"  Run ID : {run.info.run_id}")
         print(f"  Fit    : {fit_time}s")
-        print(f"  Train  ->  MAE {train_m['mae']:>9,.0f} THB  |  R2 {train_m['r2']:.4f}  |  Adj R2 {train_m['adj_r2']:.4f}")
-        print(f"  Test   ->  MAE {test_m['mae']:>9,.0f} THB  |  R2 {test_m['r2']:.4f}  |  Adj R2 {test_m['adj_r2']:.4f}")
+        print(f"  Train  ->  MAE {train_m['mae']:>9,.0f} THB  |  R2 {train_m['r2']:.4f}  |  Adj R2 {train_m['adj_r2']:.4f}")  # noqa: E501
+        print(f"  Test   ->  MAE {test_m['mae']:>9,.0f} THB  |  R2 {test_m['r2']:.4f}  |  Adj R2 {test_m['adj_r2']:.4f}")  # noqa: E501
         print(f"  Artifact -> {pkl_path.name}")
 
     return config["model"], test_m
