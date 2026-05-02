@@ -1,5 +1,10 @@
-/data/
-/models/
+# Large generated files — not committed
+/data/*.csv
+/models/*.pkl
+
+# Small static files that belong in the repo are tracked normally:
+# data/model_results.json  <- real training numbers, shown in the dashboard
+# models/best_params.json  <- Optuna result, reference for reproducibility
 .env
 __pycache__/
 .ipynb_checkpoints/

@@ -1,0 +1,76 @@
+{
+  "data_points": 23273,
+  "feature_count": 17,
+  "baseline_mae": 1693,
+  "winner_mae": 1573,
+  "improvement_pct": 7.1,
+  "target": "price",
+  "city": "Bangkok",
+  "models": [
+    {
+      "name": "Linear Regression",
+      "type": "baseline",
+      "cv_mae": null,
+      "cv_mae_std": null,
+      "test_mae": 1693,
+      "test_rmse": 19824,
+      "test_r2": 0.0006,
+      "test_adj_r2": -0.0039,
+      "fit_time_s": 0.25,
+      "is_winner": false,
+      "note": "Performance floor. Log1p target transform required due to skewness 53."
+    },
+    {
+      "name": "Random Forest",
+      "type": "candidate",
+      "cv_mae": 1424,
+      "cv_mae_std": 161,
+      "test_mae": 1580,
+      "test_rmse": 19802,
+      "test_r2": 0.0028,
+      "test_adj_r2": -0.0017,
+      "fit_time_s": 1.8,
+      "is_winner": false,
+      "note": "Majority voting dampens luxury-price outlier impact. Solid tree baseline."
+    },
+    {
+      "name": "XGBoost",
+      "type": "candidate",
+      "cv_mae": 1416,
+      "cv_mae_std": 159,
+      "test_mae": 1575,
+      "test_rmse": 19778,
+      "test_r2": 0.0052,
+      "test_adj_r2": 0.0007,
+      "fit_time_s": 1.3,
+      "is_winner": false,
+      "note": "Best R² among default-param models. Built-in L1/L2 regularisation."
+    },
+    {
+      "name": "LightGBM (default)",
+      "type": "candidate",
+      "cv_mae": 1406,
+      "cv_mae_std": 158,
+      "test_mae": 1560,
+      "test_rmse": 19794,
+      "test_r2": 0.0036,
+      "test_adj_r2": -0.0009,
+      "fit_time_s": 0.7,
+      "is_winner": false,
+      "note": "Fastest training. Best CV MAE. Selected for Optuna tuning."
+    },
+    {
+      "name": "LightGBM (tuned)",
+      "type": "winner",
+      "cv_mae": 1415,
+      "cv_mae_std": null,
+      "test_mae": 1573,
+      "test_rmse": 19770,
+      "test_r2": 0.0061,
+      "test_adj_r2": 0.0016,
+      "fit_time_s": 2.24,
+      "is_winner": true,
+      "note": "30-trial Optuna TPE search. Best R², Adj R², and RMSE overall."
+    }
+  ]
+}

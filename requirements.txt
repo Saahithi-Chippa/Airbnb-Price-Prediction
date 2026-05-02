@@ -1,12 +1,20 @@
-pandas
-scikit-learn
-xgboost
-lightgbm
-fastapi
-uvicorn
+# ── Streamlit app (Streamlit Cloud uses this file directly) ───────────────
 streamlit
-mlflow
-great-expectations
-pytest
 plotly
+pandas
+numpy
+
+# Pinned to match the environment the production_model.pkl was trained in.
+# Mismatched versions cause joblib to fail loading the sklearn wrapper.
+scikit-learn==1.5.1
+lightgbm==4.6.0
+joblib
+
+# ── Training pipeline (local only — not needed by the deployed app) ───────
+xgboost
 optuna
+mlflow
+
+# ── Dev / CI ──────────────────────────────────────────────────────────────
+pytest
+flake8
