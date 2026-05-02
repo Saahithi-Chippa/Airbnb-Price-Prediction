@@ -4,6 +4,8 @@
 
 **[Live Demo →](https://airbnb-price-prediction-j8xe3rfxndfexv3nu6kvxs.streamlit.app/)** &nbsp;|&nbsp; Python 3.9 &nbsp;|&nbsp; LightGBM + Optuna &nbsp;|&nbsp; MLflow &nbsp;|&nbsp; Streamlit
 
+![App demo](AirbnbPrediction.gif)
+
 ---
 
 ## Table of Contents
