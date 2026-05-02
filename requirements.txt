@@ -1,15 +1,17 @@
-# Streamlit app dependencies (used by Streamlit Community Cloud)
+# Streamlit app — Streamlit Community Cloud installs from this file
 streamlit
 plotly
 pandas
 numpy
-joblib==1.4.2
+joblib
 
-# Pinned: must match the versions used when production_model.pkl was trained
-scikit-learn==1.5.1
-lightgbm==4.6.0
+# No version pins: scikit-learn==1.5.1 and lightgbm==4.6.0 have no wheels
+# for Python 3.14. Use latest builds; the deployed app runs in demo mode
+# (no .pkl file in the repo) so version matching is not a runtime concern.
+scikit-learn
+lightgbm
 
-# Training pipeline (local only)
+# Training pipeline (local only — comment back in when running locally)
 # xgboost
 # optuna
 # mlflow
