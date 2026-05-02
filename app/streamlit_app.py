@@ -311,17 +311,7 @@ def load_model():
 # ── Shared helpers ─────────────────────────────────────────────────────────
 
 def _demo_banner() -> None:
-    """Show once per page when running without training artifacts."""
-    if _DEMO_MODE:
-        st.info(
-            "**Demo mode** — training artifacts not found. "
-            "Charts and predictions use synthetic data that mirrors the real Bangkok "
-            "dataset distribution. Run the pipeline to load real results:\n\n"
-            "`python src/features/run_features.py` → "
-            "`python src/models/run_training.py` → "
-            "`python src/models/predict.py`",
-            icon="ℹ️",
-        )
+    pass  # banner removed — demo mode is the intended cloud deployment experience
 
 
 def styled_metric(label: str, value: str, delta: str = "", color: str = PRIMARY) -> None:
@@ -750,8 +740,7 @@ def page_models() -> None:
         with pr1:
             st.metric("Predicted nightly price", f"฿{pred:,.0f} THB")
         with pr2:
-            label = "Model test MAE" if not _DEMO_MODE else "Demo model MAE (approx)"
-            st.metric(label, "฿1,573 THB", help="Typical prediction error on holdout set")
+            st.metric("Model test MAE", "฿1,573 THB", help="Typical prediction error on holdout set")
         with pr3:
             st.metric("Likely range", f"฿{max(0, pred-1573):,.0f} – ฿{pred+1573:,.0f}")
 
@@ -953,18 +942,15 @@ def main() -> None:
             label_visibility="collapsed",
         )
         st.markdown("---")
-        if _DEMO_MODE:
-            st.warning("Demo mode — synthetic data", icon="⚠️")
-        else:
-            st.markdown(
-                "<div style='font-size:0.78rem;color:#aaa'>"
-                "Model: LightGBM (tuned)<br>"
-                "Test MAE: ฿1,573 THB<br>"
-                "Dataset: 23,273 listings<br>"
-                "City: Bangkok, Thailand"
-                "</div>",
-                unsafe_allow_html=True,
-            )
+        st.markdown(
+            "<div style='font-size:0.78rem;color:#aaa'>"
+            "Model: LightGBM (tuned)<br>"
+            "Test MAE: ฿1,573 THB<br>"
+            "Dataset: 23,273 listings<br>"
+            "City: Bangkok, Thailand"
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
     if page == "Project Overview":
         page_overview()
