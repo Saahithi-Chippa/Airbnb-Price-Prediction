@@ -2,7 +2,7 @@
 
 > End-to-end ML pipeline that predicts nightly Airbnb prices for Bangkok listings — from raw CSV to a live interactive dashboard.
 
-**[Live Demo →](https://your-app-url-here.streamlit.app)** &nbsp;|&nbsp; Python 3.9 &nbsp;|&nbsp; LightGBM + Optuna &nbsp;|&nbsp; MLflow &nbsp;|&nbsp; Streamlit
+**[Live Demo →](https://airbnb-price-prediction-j8xe3rfxndfexv3nu6kvxs.streamlit.app/)** &nbsp;|&nbsp; Python 3.9 &nbsp;|&nbsp; LightGBM + Optuna &nbsp;|&nbsp; MLflow &nbsp;|&nbsp; Streamlit
 
 ---
 
